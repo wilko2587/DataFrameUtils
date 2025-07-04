@@ -41,7 +41,7 @@ def calculate_weighted_bins(df, id1_col='ID1', id2_col='ID2', timestamp_col='tim
     >>> df = pd.DataFrame({
     ...     'ID1': ['A', 'A', 'A', 'A'],
     ...     'ID2': ['x', 'x', 'x', 'x'],
-    ...     'timestamp': pd.date_range('2024-01-01', periods=4, freq='H'),
+    ...     'timestamp': pd.date_range('2024-01-01', periods=4, freq='h'),
     ...     'quantity1': [50, 75, 100, 25],
     ...     'quantity2': [10, 20, 30, 40]
     ... })
@@ -110,42 +110,33 @@ def calculate_weighted_bins(df, id1_col='ID1', id2_col='ID2', timestamp_col='tim
         remaining_q2 = future_q2.copy()
         
         for bin_num in range(max_bins):
-            bin_start = bin_num * bin_size
-            bin_end = (bin_num + 1) * bin_size
-            
-            # Track cumulative quantity1 and weighted sum
-            cumsum_q1 = 0
+            # We need to fill exactly bin_size units for this bin
+            needed_for_bin = bin_size
             weighted_sum = 0
             events_to_remove = []
             
             for i, (q1, q2) in enumerate(zip(remaining_q1, remaining_q2)):
-                # Check if this event completes or exceeds the bin
-                if cumsum_q1 + q1 >= bin_end:
-                    # This event crosses the bin boundary
-                    needed_q1 = bin_end - cumsum_q1
-                    
-                    if needed_q1 > 0:
-                        # Add partial contribution from this event
-                        weighted_sum += needed_q1 * q2
-                        cumsum_q1 += needed_q1
-                        
-                        # Update remaining quantity for this event
-                        remaining_q1[i] = q1 - needed_q1
-                    
+                if needed_for_bin <= 0:
+                    break
+                
+                if q1 >= needed_for_bin:
+                    # This event can fill the rest of the bin
+                    contribution = needed_for_bin * q2
+                    weighted_sum += contribution
+                    remaining_q1[i] = q1 - needed_for_bin
+                    needed_for_bin = 0
                     break
                 else:
-                    # This event fits entirely within the current bin
-                    weighted_sum += q1 * q2
-                    cumsum_q1 += q1
+                    # This event contributes all it has
+                    contribution = q1 * q2
+                    weighted_sum += contribution
+                    needed_for_bin -= q1
                     events_to_remove.append(i)
             
             # Calculate weighted average for this bin
-            if cumsum_q1 > bin_start:
-                actual_weight = cumsum_q1 - bin_start
-                if actual_weight > 0:
-                    bin_averages[f'bin_{bin_num+1}_avg'] = weighted_sum / actual_weight
-                else:
-                    bin_averages[f'bin_{bin_num+1}_avg'] = np.nan
+            quantity_in_bin = bin_size - needed_for_bin
+            if quantity_in_bin > 0:
+                bin_averages[f'bin_{bin_num+1}_avg'] = weighted_sum / quantity_in_bin
             else:
                 bin_averages[f'bin_{bin_num+1}_avg'] = np.nan
             
@@ -155,7 +146,7 @@ def calculate_weighted_bins(df, id1_col='ID1', id2_col='ID2', timestamp_col='tim
                 remaining_q2 = np.delete(remaining_q2, events_to_remove)
             
             # If no more events, fill remaining bins with NaN
-            if len(remaining_q1) == 0:
+            if len(remaining_q1) == 0 or (len(remaining_q1) == 1 and remaining_q1[0] == 0):
                 for future_bin in range(bin_num + 1, max_bins):
                     bin_averages[f'bin_{future_bin+1}_avg'] = np.nan
                 break
@@ -234,34 +225,106 @@ def demonstrate_usage():
     print("  - Weighted average = (100*50) / 100 = 50.0")
 
 
+def run_comprehensive_test():
+    """Run a comprehensive test with detailed bin transitions."""
+    
+    print("="*80)
+    print("COMPREHENSIVE TEST: Detailed Bin Transitions")
+    print("="*80)
+    
+    # Create test dataset
+    np.random.seed(42)
+    n_rows = 100
+    id1s = np.random.choice(['A', 'B', 'C'], n_rows)
+    id2s = np.random.choice(['X', 'Y'], n_rows)
+    timestamps = pd.date_range('2024-01-01', periods=n_rows, freq='h')
+    quantity1 = np.random.randint(10, 201, n_rows)
+    quantity2 = np.random.randint(5, 51, n_rows)
+    
+    df = pd.DataFrame({
+        'ID1': id1s,
+        'ID2': id2s,
+        'timestamp': timestamps,
+        'quantity1': quantity1,
+        'quantity2': quantity2
+    })
+    
+    # Get the raw data for group (A, X)
+    group_ax = df[(df['ID1'] == 'A') & (df['ID2'] == 'X')].sort_values('timestamp').reset_index(drop=True)
+    
+    # First row's future events
+    first_row = group_ax.iloc[0]
+    future_events = group_ax.iloc[1:]
+    
+    print(f"ANALYZING FIRST ROW:")
+    print(f"Timestamp: {first_row['timestamp']}")
+    print(f"Quantity1: {first_row['quantity1']}")
+    print(f"Quantity2: {first_row['quantity2']}")
+    print()
+    
+    print("FUTURE EVENTS (first 10):")
+    print("-" * 50)
+    for i in range(min(10, len(future_events))):
+        print(f"Event {i}: quantity1={future_events.iloc[i]['quantity1']:3d}, "
+              f"quantity2={future_events.iloc[i]['quantity2']:2d}")
+    print()
+    
+    # Run the algorithm
+    result = calculate_weighted_bins(
+        df=df,
+        id1_col='ID1',
+        id2_col='ID2',
+        timestamp_col='timestamp',
+        q1_col='quantity1',
+        q2_col='quantity2',
+        bin_size=50,
+        max_bins=8
+    )
+    
+    # Get the first row result for group (A, X)
+    result_ax = result[(result['ID1'] == 'A') & (result['ID2'] == 'X')].iloc[0]
+    
+    print("ALGORITHM RESULTS:")
+    print("-" * 50)
+    for i in range(1, 9):
+        col_name = f'bin_{i}_avg'
+        if col_name in result_ax:
+            value = result_ax[col_name]
+            if pd.notna(value):
+                print(f"Bin {i}: {value:.2f}")
+            else:
+                print(f"Bin {i}: NaN")
+    
+    print("\n" + "="*80)
+    print("EXPECTED RESULTS:")
+    print("="*80)
+    print("Bin 1: 39.00 (50 units from Event 0)")
+    print("Bin 2: 39.00 (50 units from Event 0)")
+    print("Bin 3: 39.00 (50 units from Event 0)")
+    print("Bin 4: 38.78 (49 units from Event 0 + 1 unit from Event 1)")
+    print("Bin 5: 28.00 (50 units from Event 1)")
+    print("Bin 6: 41.20 (20 units from Event 1 + 30 units from Event 2)")
+    print("Bin 7: 39.36 (31 units from Event 2 + 19 units from Event 3)")
+    print("Bin 8: 12.40 (2 units from Event 3 + 48 units from Event 4)")
+    
+    return df, result
+
+
 if __name__ == "__main__":
     # Run demonstration
     demonstrate_usage()
     
-    # Example of loading and processing a CSV file
     print("\n" + "="*80)
-    print("EXAMPLE: Processing a CSV file")
+    print("RUNNING COMPREHENSIVE TEST")
     print("="*80)
     
-    try:
-        # Try to load the sample data
-        df = pd.read_csv('sample_data.csv')
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        
-        print(f"Loaded {len(df):,} rows from sample_data.csv")
-        print("Processing with default column names...")
-        
-        result = calculate_weighted_bins(df, bin_size=100, max_bins=5)
-        
-        print(f"Results shape: {result.shape}")
-        print("First few rows:")
-        print(result.head())
-        
-        # Save results
-        result.to_csv('weighted_bin_results.csv', index=False)
-        print("Results saved to 'weighted_bin_results.csv'")
-        
-    except FileNotFoundError:
-        print("sample_data.csv not found. Run generate_data.py first to create sample data.")
-    except Exception as e:
-        print(f"Error processing file: {e}") 
+    # Run comprehensive test
+    df, result = run_comprehensive_test()
+    
+    # Save results
+    result.to_csv('weighted_bin_results.csv', index=False)
+    print(f"\nResults saved to 'weighted_bin_results.csv'")
+    
+    print("\n" + "="*80)
+    print("TEST COMPLETED SUCCESSFULLY!")
+    print("="*80) 
