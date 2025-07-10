@@ -4,18 +4,18 @@ A Python utility for calculating weighted averages of quantity2 values in bins o
 
 ## Overview
 
-This tool is designed for time-series data analysis where you need to:
-- Group data by identifiers
+This tool is designed for financial and time-series data analysis where you need to:
+- Group data by multiple identifiers (e.g., asset and type)
 - Calculate weighted averages of one quantity based on another quantity
 - Handle events that span multiple bins
 - Process data chronologically (only future events are considered)
 
 ## Use Cases
 
-- **Data Analysis**: Calculate weighted averages across different size ranges
+- **Trading Data**: Calculate weighted average prices in volume bins
 - **Inventory Analysis**: Analyze costs across order size ranges
 - **Time Series**: Study value distributions across duration bins
-- **Statistical Modeling**: Analysis across different quantity categories
+- **Financial Modeling**: Risk analysis across position size categories
 
 ## Installation
 
@@ -31,21 +31,21 @@ import pandas as pd
 
 # Create sample data
 df = pd.DataFrame({
-    'ID1': ['A', 'A', 'A', 'A'],
-    'ID2': ['X', 'X', 'X', 'X'],
-    'timestamp': pd.date_range('2024-01-01', periods=4, freq='h'),
-    'quantity1': [50, 75, 100, 25],
-    'quantity2': [10, 20, 30, 40]
+    'Asset': ['A', 'A', 'A', 'A'],
+    'Type': ['X', 'X', 'X', 'X'],
+    'Time': pd.date_range('2024-01-01', periods=4, freq='h'),
+    'Volume': [50, 75, 100, 25],
+    'Price': [10, 20, 30, 40]
 })
 
 # Calculate weighted bins
 result = calculate_weighted_bins(
     df=df,
-    id1_col='ID1',
-    id2_col='ID2',
-    timestamp_col='timestamp',
-    q1_col='quantity1',
-    q2_col='quantity2',
+    id1_col='Asset',
+    id2_col='Type',
+    timestamp_col='Time',
+    q1_col='Volume',
+    q2_col='Price',
     bin_size=100,
     max_bins=3
 )
@@ -57,7 +57,7 @@ print(result)
 
 ### Algorithm Overview
 
-1. **Grouping**: Data is grouped by ID1 (e.g., entity identifier)
+1. **Grouping**: Data is grouped by ID1 and ID2 (e.g., Asset and Type)
 2. **Sorting**: Within each group, data is sorted chronologically by timestamp
 3. **Processing**: For each row, the algorithm:
    - Looks at future events (after the current timestamp)
@@ -68,16 +68,16 @@ print(result)
 ### Example Calculation
 
 For a row with future events:
-- Event 1: quantity1=199, quantity2=39
-- Event 2: quantity1=71, quantity2=28
-- Event 3: quantity1=61, quantity2=50
+- Event 1: Volume=199, Price=39
+- Event 2: Volume=71, Price=28
+- Event 3: Volume=61, Price=50
 
 With bin_size=50, the results would be:
-- **Bin 1 (0-50)**: 36×45 + 14×39 = 43.32 average
+- **Bin 1 (0-50)**: 50×39 = 39.00 average
 - **Bin 2 (50-100)**: 50×39 = 39.00 average  
 - **Bin 3 (100-150)**: 50×39 = 39.00 average
-- **Bin 4 (150-200)**: 50×39 = 39.00 average
-- **Bin 5 (200-250)**: 35×39 + 15×28 = 35.70 average
+- **Bin 4 (150-200)**: 49×39 + 1×28 = 38.78 average
+- **Bin 5 (200-250)**: 50×28 = 28.00 average
 
 ## API Reference
 
@@ -85,8 +85,8 @@ With bin_size=50, the results would be:
 
 **Parameters:**
 - `df` (DataFrame): Input data
-- `id1_col` (str): First identifier column (default: 'ID1') - used for grouping
-- `id2_col` (str): Second identifier column (default: 'ID2') - required in data but not used for grouping
+- `id1_col` (str): First identifier column (default: 'ID1')
+- `id2_col` (str): Second identifier column (default: 'ID2')
 - `timestamp_col` (str): Timestamp column (default: 'timestamp')
 - `q1_col` (str): Quantity1 column for binning (default: 'quantity1')
 - `q2_col` (str): Quantity2 column for averaging (default: 'quantity2')
@@ -99,11 +99,9 @@ With bin_size=50, the results would be:
 ## Data Requirements
 
 Your DataFrame must contain:
-- **ID1 column**: Primary identifier used for grouping
-- **ID2 column**: Secondary identifier (required in data but not used for grouping)
+- **ID columns**: Two identifier columns for grouping
 - **Timestamp column**: For chronological ordering
-- **Quantity1 column**: Numeric column used for binning
-- **Quantity2 column**: Numeric column used for weighted averaging
+- **Quantity columns**: Two numeric columns (one for binning, one for averaging)
 
 ## Examples
 
@@ -118,11 +116,11 @@ result = calculate_weighted_bins(df, bin_size=50, max_bins=5)
 # Use your own column names
 result = calculate_weighted_bins(
     df=df,
-    id1_col='Entity',
-    id2_col='Category',
+    id1_col='Asset',
+    id2_col='Type',
     timestamp_col='Time',
-    q1_col='Size',
-    q2_col='Value',
+    q1_col='Volume',
+    q2_col='Price',
     bin_size=100,
     max_bins=3
 )

@@ -8,7 +8,7 @@ def calculate_weighted_bins(df, id1_col='ID1', id2_col='ID2', timestamp_col='tim
     """
     Calculate weighted averages of quantity2 in bins of quantity1 increments.
     
-    This function groups data by ID1, then for each row calculates weighted averages
+    This function groups data by ID1 and ID2, then for each row calculates weighted averages
     of quantity2 in bins of quantity1 increments. Events that span bin boundaries are handled
     by splitting them proportionally.
     
@@ -19,7 +19,7 @@ def calculate_weighted_bins(df, id1_col='ID1', id2_col='ID2', timestamp_col='tim
     id1_col : str
         Column name for the first identifier (default: 'ID1')
     id2_col : str
-        Column name for the second identifier (default: 'ID2') - kept for output but not used for grouping
+        Column name for the second identifier (default: 'ID2')
     timestamp_col : str
         Column name for timestamps (default: 'timestamp')
     q1_col : str
@@ -58,14 +58,14 @@ def calculate_weighted_bins(df, id1_col='ID1', id2_col='ID2', timestamp_col='tim
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
     
-    # Sort by ID1 and timestamp (removed ID2 from sorting)
-    df_sorted = df.sort_values([id1_col, timestamp_col]).reset_index(drop=True)
+    # Sort by ID1, ID2, and timestamp
+    df_sorted = df.sort_values([id1_col, id2_col, timestamp_col]).reset_index(drop=True)
     
-    # Pre-compute group indices for O(1) lookup (now only by ID1)
+    # Pre-compute group indices for O(1) lookup
     print("Pre-computing group indices...")
     group_indices = {}
     for idx, row in df_sorted.iterrows():
-        key = row[id1_col]  # Only use ID1 for grouping
+        key = (row[id1_col], row[id2_col])
         if key not in group_indices:
             group_indices[key] = []
         group_indices[key].append(idx)
@@ -85,7 +85,7 @@ def calculate_weighted_bins(df, id1_col='ID1', id2_col='ID2', timestamp_col='tim
     # Process each row with progress bar
     for idx in tqdm(range(n), desc="Processing rows", unit="rows"):
         current_row = df_sorted.iloc[idx]
-        key = current_row[id1_col]  # Only use ID1 for grouping
+        key = (current_row[id1_col], current_row[id2_col])
         
         # Get indices for this group
         group_idx_list = group_indices[key]
@@ -173,6 +173,58 @@ def calculate_weighted_bins(df, id1_col='ID1', id2_col='ID2', timestamp_col='tim
     return result_df
 
 
+def demonstrate_usage():
+    """Demonstrate how to use the function with different column names."""
+    
+    print("="*80)
+    print("DEMONSTRATION: Weighted Bin Calculation")
+    print("="*80)
+    
+    # Create sample data with different column names
+    sample_data = pd.DataFrame({
+        'Asset': ['A', 'A', 'A', 'A', 'A'],
+        'Type': ['x', 'x', 'x', 'x', 'x'],
+        'Time': pd.date_range('2024-01-01', periods=5, freq='h'),
+        'Volume': [50, 75, 100, 25, 150],
+        'Price': [10, 20, 30, 40, 50]
+    })
+    
+    print("Sample data with custom column names:")
+    print(sample_data)
+    print("\n" + "="*80)
+    
+    # Calculate weighted bins with custom column names
+    result = calculate_weighted_bins(
+        df=sample_data,
+        id1_col='Asset',
+        id2_col='Type', 
+        timestamp_col='Time',
+        q1_col='Volume',
+        q2_col='Price',
+        bin_size=100,
+        max_bins=3
+    )
+    
+    print("Results:")
+    print(result)
+    print("\n" + "="*80)
+    
+    # Explain the calculation
+    print("Explanation for first row:")
+    print("Future events: rows 1-4")
+    print("Bin 1 (0-100):")
+    print("  - Event 1: Volume=75, Price=20 → contributes 75")
+    print("  - Event 2: Volume=100, Price=30 → need only 25 to reach 100")
+    print("  - Weighted average = (75*20 + 25*30) / 100 = 22.5")
+    print("Bin 2 (100-200):")
+    print("  - Event 2 remainder: Volume=75, Price=30 → contributes 75")
+    print("  - Event 3: Volume=25, Price=40 → contributes 25")
+    print("  - Weighted average = (75*30 + 25*40) / 100 = 32.5")
+    print("Bin 3 (200-300):")
+    print("  - Event 4: Volume=150, Price=50 → need only 100 to reach 300")
+    print("  - Weighted average = (100*50) / 100 = 50.0")
+
+
 def run_comprehensive_test():
     """Run a comprehensive test with detailed bin transitions."""
     
@@ -197,16 +249,15 @@ def run_comprehensive_test():
         'quantity2': quantity2
     })
     
-    # Get the raw data for group A (now only grouped by ID1)
-    group_a = df[df['ID1'] == 'A'].sort_values('timestamp').reset_index(drop=True)
+    # Get the raw data for group (A, X)
+    group_ax = df[(df['ID1'] == 'A') & (df['ID2'] == 'X')].sort_values('timestamp').reset_index(drop=True)
     
     # First row's future events
-    first_row = group_a.iloc[0]
-    future_events = group_a.iloc[1:]
+    first_row = group_ax.iloc[0]
+    future_events = group_ax.iloc[1:]
     
     print(f"ANALYZING FIRST ROW:")
     print(f"Timestamp: {first_row['timestamp']}")
-    print(f"ID2: {first_row['ID2']}")
     print(f"Quantity1: {first_row['quantity1']}")
     print(f"Quantity2: {first_row['quantity2']}")
     print()
@@ -214,8 +265,7 @@ def run_comprehensive_test():
     print("FUTURE EVENTS (first 10):")
     print("-" * 50)
     for i in range(min(10, len(future_events))):
-        print(f"Event {i}: ID2={future_events.iloc[i]['ID2']}, "
-              f"quantity1={future_events.iloc[i]['quantity1']:3d}, "
+        print(f"Event {i}: quantity1={future_events.iloc[i]['quantity1']:3d}, "
               f"quantity2={future_events.iloc[i]['quantity2']:2d}")
     print()
     
@@ -231,15 +281,15 @@ def run_comprehensive_test():
         max_bins=8
     )
     
-    # Get the first row result for group A
-    result_a = result[result['ID1'] == 'A'].iloc[0]
+    # Get the first row result for group (A, X)
+    result_ax = result[(result['ID1'] == 'A') & (result['ID2'] == 'X')].iloc[0]
     
     print("ALGORITHM RESULTS:")
     print("-" * 50)
     for i in range(1, 9):
         col_name = f'bin_{i}_avg'
-        if col_name in result_a:
-            value = result_a[col_name]
+        if col_name in result_ax:
+            value = result_ax[col_name]
             if pd.notna(value):
                 print(f"Bin {i}: {value:.2f}")
             else:
@@ -248,15 +298,23 @@ def run_comprehensive_test():
     print("\n" + "="*80)
     print("EXPECTED RESULTS:")
     print("="*80)
-    print("Note: Results now include all future events for ID1='A' regardless of ID2 value")
-    print("This means more data points contribute to each bin compared to the previous")
-    print("dual-grouping approach, potentially leading to different weighted averages.")
+    print("Bin 1: 39.00 (50 units from Event 0)")
+    print("Bin 2: 39.00 (50 units from Event 0)")
+    print("Bin 3: 39.00 (50 units from Event 0)")
+    print("Bin 4: 38.78 (49 units from Event 0 + 1 unit from Event 1)")
+    print("Bin 5: 28.00 (50 units from Event 1)")
+    print("Bin 6: 41.20 (20 units from Event 1 + 30 units from Event 2)")
+    print("Bin 7: 39.36 (31 units from Event 2 + 19 units from Event 3)")
+    print("Bin 8: 12.40 (2 units from Event 3 + 48 units from Event 4)")
     
     return df, result
 
 
 if __name__ == "__main__":
-
+    # Run demonstration
+    demonstrate_usage()
+    
+    print("\n" + "="*80)
     print("RUNNING COMPREHENSIVE TEST")
     print("="*80)
     
