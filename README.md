@@ -32,7 +32,6 @@ import pandas as pd
 # Create sample data
 df = pd.DataFrame({
     'ID1': ['A', 'A', 'A', 'A'],
-    'ID2': ['X', 'X', 'X', 'X'],
     'timestamp': pd.date_range('2024-01-01', periods=4, freq='h'),
     'quantity1': [50, 75, 100, 25],
     'quantity2': [10, 20, 30, 40]
@@ -42,7 +41,6 @@ df = pd.DataFrame({
 result = calculate_weighted_bins(
     df=df,
     id1_col='ID1',
-    id2_col='ID2',
     timestamp_col='timestamp',
     q1_col='quantity1',
     q2_col='quantity2',
@@ -85,8 +83,7 @@ With bin_size=50, the results would be:
 
 **Parameters:**
 - `df` (DataFrame): Input data
-- `id1_col` (str): First identifier column (default: 'ID1') - used for grouping
-- `id2_col` (str): Second identifier column (default: 'ID2') - required in data but not used for grouping
+- `id1_col` (str): Identifier column for grouping (default: 'ID1')
 - `timestamp_col` (str): Timestamp column (default: 'timestamp')
 - `q1_col` (str): Quantity1 column for binning (default: 'quantity1')
 - `q2_col` (str): Quantity2 column for averaging (default: 'quantity2')
@@ -99,8 +96,7 @@ With bin_size=50, the results would be:
 ## Data Requirements
 
 Your DataFrame must contain:
-- **ID1 column**: Primary identifier used for grouping
-- **ID2 column**: Secondary identifier (required in data but not used for grouping)
+- **ID1 column**: Identifier used for grouping
 - **Timestamp column**: For chronological ordering
 - **Quantity1 column**: Numeric column used for binning
 - **Quantity2 column**: Numeric column used for weighted averaging
@@ -119,7 +115,6 @@ result = calculate_weighted_bins(df, bin_size=50, max_bins=5)
 result = calculate_weighted_bins(
     df=df,
     id1_col='Entity',
-    id2_col='Category',
     timestamp_col='Time',
     q1_col='Size',
     q2_col='Value',
