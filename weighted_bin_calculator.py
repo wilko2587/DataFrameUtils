@@ -3,7 +3,7 @@ import numpy as np
 import time
 from tqdm import tqdm
 
-def calculate_weighted_bins(df, id1_col='ID1', timestamp_col='timestamp', 
+def calculate_weighted_bins(df, id1_col='ID1', id2_col='ID2', timestamp_col='timestamp', 
                            q1_col='quantity1', q2_col='quantity2', bin_size=100, max_bins=10):
     """
     Calculate weighted averages of quantity2 in bins of quantity1 increments.
@@ -18,6 +18,8 @@ def calculate_weighted_bins(df, id1_col='ID1', timestamp_col='timestamp',
         Input dataframe containing the data
     id1_col : str
         Column name for the first identifier (default: 'ID1')
+    id2_col : str
+        Column name for the second identifier (default: 'ID2') - kept for output but not used for grouping
     timestamp_col : str
         Column name for timestamps (default: 'timestamp')
     q1_col : str
@@ -38,6 +40,7 @@ def calculate_weighted_bins(df, id1_col='ID1', timestamp_col='timestamp',
     --------
     >>> df = pd.DataFrame({
     ...     'ID1': ['A', 'A', 'A', 'A'],
+    ...     'ID2': ['x', 'x', 'x', 'x'],
     ...     'timestamp': pd.date_range('2024-01-01', periods=4, freq='h'),
     ...     'quantity1': [50, 75, 100, 25],
     ...     'quantity2': [10, 20, 30, 40]
@@ -50,15 +53,15 @@ def calculate_weighted_bins(df, id1_col='ID1', timestamp_col='timestamp',
     start_time = time.time()
     
     # Validate input columns exist
-    required_cols = [id1_col, timestamp_col, q1_col, q2_col]
+    required_cols = [id1_col, id2_col, timestamp_col, q1_col, q2_col]
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
     
-    # Sort by ID1 and timestamp
+    # Sort by ID1 and timestamp (removed ID2 from sorting)
     df_sorted = df.sort_values([id1_col, timestamp_col]).reset_index(drop=True)
     
-    # Pre-compute group indices for O(1) lookup (only by ID1)
+    # Pre-compute group indices for O(1) lookup (now only by ID1)
     print("Pre-computing group indices...")
     group_indices = {}
     for idx, row in df_sorted.iterrows():
@@ -69,6 +72,7 @@ def calculate_weighted_bins(df, id1_col='ID1', timestamp_col='timestamp',
     
     # Convert to numpy arrays for faster access
     id1_arr = df_sorted[id1_col].values
+    id2_arr = df_sorted[id2_col].values
     timestamp_arr = df_sorted[timestamp_col].values
     q1_arr = df_sorted[q1_col].values
     q2_arr = df_sorted[q2_col].values
@@ -150,6 +154,7 @@ def calculate_weighted_bins(df, id1_col='ID1', timestamp_col='timestamp',
         # Create result row with original column names
         result_row = {
             id1_col: current_row[id1_col],
+            id2_col: current_row[id2_col],
             timestamp_col: current_row[timestamp_col],
             q1_col: current_row[q1_col],
             q2_col: current_row[q2_col]
@@ -179,18 +184,20 @@ def run_comprehensive_test():
     np.random.seed(42)
     n_rows = 100
     id1s = np.random.choice(['A', 'B', 'C'], n_rows)
+    id2s = np.random.choice(['X', 'Y'], n_rows)
     timestamps = pd.date_range('2024-01-01', periods=n_rows, freq='h')
     quantity1 = np.random.randint(10, 201, n_rows)
     quantity2 = np.random.randint(5, 51, n_rows)
     
     df = pd.DataFrame({
         'ID1': id1s,
+        'ID2': id2s,
         'timestamp': timestamps,
         'quantity1': quantity1,
         'quantity2': quantity2
     })
     
-    # Get the raw data for group A (only grouped by ID1)
+    # Get the raw data for group A (now only grouped by ID1)
     group_a = df[df['ID1'] == 'A'].sort_values('timestamp').reset_index(drop=True)
     
     # First row's future events
@@ -199,6 +206,7 @@ def run_comprehensive_test():
     
     print(f"ANALYZING FIRST ROW:")
     print(f"Timestamp: {first_row['timestamp']}")
+    print(f"ID2: {first_row['ID2']}")
     print(f"Quantity1: {first_row['quantity1']}")
     print(f"Quantity2: {first_row['quantity2']}")
     print()
@@ -206,7 +214,8 @@ def run_comprehensive_test():
     print("FUTURE EVENTS (first 10):")
     print("-" * 50)
     for i in range(min(10, len(future_events))):
-        print(f"Event {i}: quantity1={future_events.iloc[i]['quantity1']:3d}, "
+        print(f"Event {i}: ID2={future_events.iloc[i]['ID2']}, "
+              f"quantity1={future_events.iloc[i]['quantity1']:3d}, "
               f"quantity2={future_events.iloc[i]['quantity2']:2d}")
     print()
     
@@ -214,6 +223,7 @@ def run_comprehensive_test():
     result = calculate_weighted_bins(
         df=df,
         id1_col='ID1',
+        id2_col='ID2',
         timestamp_col='timestamp',
         q1_col='quantity1',
         q2_col='quantity2',
@@ -238,8 +248,9 @@ def run_comprehensive_test():
     print("\n" + "="*80)
     print("EXPECTED RESULTS:")
     print("="*80)
-    print("Note: Results now include all future events for ID1='A'")
-    print("This provides a broader view of future patterns for each entity.")
+    print("Note: Results now include all future events for ID1='A' regardless of ID2 value")
+    print("This means more data points contribute to each bin compared to the previous")
+    print("dual-grouping approach, potentially leading to different weighted averages.")
     
     return df, result
 
