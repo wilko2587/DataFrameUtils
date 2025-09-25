@@ -4,18 +4,18 @@ A Python utility for calculating weighted averages of quantity2 values in bins o
 
 ## Overview
 
-This tool is designed for financial and time-series data analysis where you need to:
-- Group data by multiple identifiers (e.g., asset and type)
+This tool is designed for time-series data analysis where you need to:
+- Group data by multiple identifiers (e.g., entity and category)
 - Calculate weighted averages of one quantity based on another quantity
 - Handle events that span multiple bins
 - Process data chronologically (only future events are considered)
 
 ## Use Cases
 
-- **Trading Data**: Calculate weighted average prices in volume bins
+- **Data Analysis**: Calculate weighted averages across different size ranges
 - **Inventory Analysis**: Analyze costs across order size ranges
 - **Time Series**: Study value distributions across duration bins
-- **Financial Modeling**: Risk analysis across position size categories
+- **Statistical Modeling**: Analysis across different quantity categories
 
 ## Installation
 
@@ -31,21 +31,21 @@ import pandas as pd
 
 # Create sample data
 df = pd.DataFrame({
-    'Asset': ['A', 'A', 'A', 'A'],
-    'Type': ['X', 'X', 'X', 'X'],
-    'Time': pd.date_range('2024-01-01', periods=4, freq='h'),
-    'Volume': [50, 75, 100, 25],
-    'Price': [10, 20, 30, 40]
+    'ID1': ['A', 'A', 'A', 'A'],
+    'ID2': ['X', 'X', 'X', 'X'],
+    'timestamp': pd.date_range('2024-01-01', periods=4, freq='h'),
+    'quantity1': [50, 75, 100, 25],
+    'quantity2': [10, 20, 30, 40]
 })
 
 # Calculate weighted bins
 result = calculate_weighted_bins(
     df=df,
-    id1_col='Asset',
-    id2_col='Type',
-    timestamp_col='Time',
-    q1_col='Volume',
-    q2_col='Price',
+    id1_col='ID1',
+    id2_col='ID2',
+    timestamp_col='timestamp',
+    q1_col='quantity1',
+    q2_col='quantity2',
     bin_size=100,
     max_bins=3
 )
@@ -57,7 +57,7 @@ print(result)
 
 ### Algorithm Overview
 
-1. **Grouping**: Data is grouped by ID1 and ID2 (e.g., Asset and Type)
+1. **Grouping**: Data is grouped by ID1 and ID2 (e.g., entity and category)
 2. **Sorting**: Within each group, data is sorted chronologically by timestamp
 3. **Processing**: For each row, the algorithm:
    - Looks at future events (after the current timestamp)
@@ -68,9 +68,9 @@ print(result)
 ### Example Calculation
 
 For a row with future events:
-- Event 1: Volume=199, Price=39
-- Event 2: Volume=71, Price=28
-- Event 3: Volume=61, Price=50
+- Event 1: quantity1=199, quantity2=39
+- Event 2: quantity1=71, quantity2=28
+- Event 3: quantity1=61, quantity2=50
 
 With bin_size=50, the results would be:
 - **Bin 1 (0-50)**: 50×39 = 39.00 average
@@ -116,11 +116,11 @@ result = calculate_weighted_bins(df, bin_size=50, max_bins=5)
 # Use your own column names
 result = calculate_weighted_bins(
     df=df,
-    id1_col='Asset',
-    id2_col='Type',
+    id1_col='Entity',
+    id2_col='Category',
     timestamp_col='Time',
-    q1_col='Volume',
-    q2_col='Price',
+    q1_col='Size',
+    q2_col='Value',
     bin_size=100,
     max_bins=3
 )
