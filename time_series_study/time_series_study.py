@@ -682,3 +682,426 @@ class TimeSeriesStudy:
             'mutual_info': pd.DataFrame.from_records(mi_rows).sort_values(['pair','group']).reset_index(drop=True),
         }
         return out
+
+    def regime_detection(self, feature: str, n_regimes: int = 2, publish_plot: bool = False, 
+                        table: bool = False, results_dir: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Detect regime changes using Markov Switching models.
+        
+        Parameters:
+        -----------
+        feature : str
+            Feature column name to analyze
+        n_regimes : int, default=2
+            Number of regimes to detect
+        publish_plot : bool, default=False
+            Whether to generate and save plots
+        table : bool, default=False
+            Whether to save results as tables
+        results_dir : str, optional
+            Directory to save outputs (default: time_series_study/results/)
+            
+        Returns:
+        --------
+        Dict containing regime probabilities, transition matrix, and summary statistics
+        """
+        try:
+            from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
+        except ImportError:
+            raise ImportError("statsmodels required for regime detection")
+        
+        results_dir = results_dir or 'time_series_study/results'
+        os.makedirs(results_dir, exist_ok=True)
+        
+        regime_data = []
+        transition_matrices = []
+        
+        for group_key, subdf in self._iter_groups():
+            if feature not in subdf.columns:
+                continue
+                
+            x = subdf[feature].dropna()
+            if len(x) < 20:  # Need sufficient data
+                continue
+                
+            try:
+                # Fit Markov Switching model
+                model = MarkovRegression(x, k_regimes=n_regimes, trend='c')
+                fitted_model = model.fit()
+                
+                # Get regime probabilities
+                regime_probs = fitted_model.smoothed_marginal_probabilities
+                
+                # Store results
+                regime_data.append({
+                    'group': group_key,
+                    'feature': feature,
+                    'regime_1_prob': regime_probs[0].mean(),
+                    'regime_2_prob': regime_probs[1].mean(),
+                    'regime_switches': (np.diff(np.argmax(regime_probs, axis=0)) != 0).sum(),
+                    'log_likelihood': fitted_model.llf,
+                    'aic': fitted_model.aic,
+                    'bic': fitted_model.bic
+                })
+                
+                # Get transition probabilities (different API)
+                transition_probs = fitted_model.params[fitted_model.params.index.str.contains('p[0-9][0-9]')]
+                transition_matrices.append({
+                    'group': group_key,
+                    'transition_matrix': transition_probs.values
+                })
+                
+            except Exception as e:
+                print(f"Warning: Could not fit regime model for {group_key}: {e}")
+                continue
+        
+        regime_df = pd.DataFrame(regime_data)
+        transition_df = pd.DataFrame(transition_matrices)
+        
+        # Save tables
+        if table:
+            regime_df.to_csv(f'{results_dir}/regime_detection.csv', index=False)
+            transition_df.to_csv(f'{results_dir}/regime_transitions.csv', index=False)
+        
+        # Generate plots
+        if publish_plot and not regime_df.empty:
+            self._plot_regime_analysis(regime_df, feature, results_dir)
+        
+        return {
+            'regime_stats': regime_df,
+            'transition_matrices': transition_df,
+            'summary': {
+                'avg_switches': regime_df['regime_switches'].mean(),
+                'avg_regime_1_prob': regime_df['regime_1_prob'].mean(),
+                'avg_regime_2_prob': regime_df['regime_2_prob'].mean()
+            }
+        }
+
+    def volatility_analysis(self, feature: str, model_type: str = 'GARCH', 
+                          publish_plot: bool = False, table: bool = False, 
+                          results_dir: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Analyze volatility clustering using GARCH models.
+        
+        Parameters:
+        -----------
+        feature : str
+            Feature column name to analyze
+        model_type : str, default='GARCH'
+            Type of volatility model ('GARCH', 'EGARCH', 'GJR-GARCH')
+        publish_plot : bool, default=False
+            Whether to generate and save plots
+        table : bool, default=False
+            Whether to save results as tables
+        results_dir : str, optional
+            Directory to save outputs (default: time_series_study/results/)
+            
+        Returns:
+        --------
+        Dict containing volatility model results and diagnostics
+        """
+        try:
+            from arch import arch_model
+        except ImportError:
+            raise ImportError("arch package required for volatility analysis")
+        
+        results_dir = results_dir or 'time_series_study/results'
+        os.makedirs(results_dir, exist_ok=True)
+        
+        volatility_data = []
+        
+        for group_key, subdf in self._iter_groups():
+            if feature not in subdf.columns:
+                continue
+                
+            x = subdf[feature].dropna()
+            if len(x) < 50:  # Need sufficient data for GARCH
+                continue
+                
+            try:
+                # Fit volatility model using arch package
+                if model_type == 'GARCH':
+                    model = arch_model(x, vol='GARCH', p=1, q=1)
+                elif model_type == 'EGARCH':
+                    model = arch_model(x, vol='EGARCH', p=1, o=1, q=1)
+                elif model_type == 'GJR-GARCH':
+                    model = arch_model(x, vol='GARCH', p=1, o=1, q=1)
+                else:
+                    raise ValueError(f"Unknown model type: {model_type}")
+                
+                fitted_model = model.fit(disp='off')
+                
+                # Calculate volatility metrics
+                conditional_vol = fitted_model.conditional_volatility
+                returns = x.pct_change().dropna()
+                
+                # Calculate persistence (sum of ARCH and GARCH coefficients)
+                persistence = 0
+                for param_name in fitted_model.params.index:
+                    if 'alpha' in param_name or 'beta' in param_name:
+                        persistence += fitted_model.params[param_name]
+                
+                volatility_data.append({
+                    'group': group_key,
+                    'feature': feature,
+                    'model_type': model_type,
+                    'log_likelihood': fitted_model.loglikelihood,
+                    'aic': fitted_model.aic,
+                    'bic': fitted_model.bic,
+                    'avg_volatility': conditional_vol.mean(),
+                    'vol_std': conditional_vol.std(),
+                    'vol_skew': conditional_vol.skew(),
+                    'vol_kurt': conditional_vol.kurtosis(),
+                    'persistence': persistence
+                })
+                
+            except Exception as e:
+                print(f"Warning: Could not fit {model_type} model for {group_key}: {e}")
+                continue
+        
+        vol_df = pd.DataFrame(volatility_data)
+        
+        # Save tables
+        if table:
+            vol_df.to_csv(f'{results_dir}/volatility_analysis_{model_type.lower()}.csv', index=False)
+        
+        # Generate plots
+        if publish_plot and not vol_df.empty:
+            self._plot_volatility_analysis(vol_df, feature, model_type, results_dir)
+        
+        return {
+            'volatility_stats': vol_df,
+            'summary': {
+                'avg_persistence': vol_df['persistence'].mean() if not vol_df.empty else 0,
+                'avg_volatility': vol_df['avg_volatility'].mean() if not vol_df.empty else 0,
+                'vol_clustering': vol_df['persistence'].mean() > 0.8 if not vol_df.empty else False
+            }
+        }
+
+    def outlier_detection(self, feature: str, method: str = 'isolation_forest', 
+                         publish_plot: bool = False, table: bool = False, 
+                         results_dir: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Detect outliers in time series data.
+        
+        Parameters:
+        -----------
+        feature : str
+            Feature column name to analyze
+        method : str, default='isolation_forest'
+            Outlier detection method ('isolation_forest', 'local_outlier_factor', 'zscore')
+        publish_plot : bool, default=False
+            Whether to generate and save plots
+        table : bool, default=False
+            Whether to save results as tables
+        results_dir : str, optional
+            Directory to save outputs (default: time_series_study/results/)
+            
+        Returns:
+        --------
+        Dict containing outlier detection results
+        """
+        from sklearn.ensemble import IsolationForest
+        from sklearn.neighbors import LocalOutlierFactor
+        from scipy import stats
+        
+        results_dir = results_dir or 'time_series_study/results'
+        os.makedirs(results_dir, exist_ok=True)
+        
+        outlier_data = []
+        
+        for group_key, subdf in self._iter_groups():
+            if feature not in subdf.columns:
+                continue
+                
+            x = subdf[feature].dropna()
+            if len(x) < 10:
+                continue
+                
+            try:
+                if method == 'isolation_forest':
+                    detector = IsolationForest(contamination=0.1, random_state=42)
+                    outlier_labels = detector.fit_predict(x.values.reshape(-1, 1))
+                    outlier_scores = detector.decision_function(x.values.reshape(-1, 1))
+                    
+                elif method == 'local_outlier_factor':
+                    detector = LocalOutlierFactor(n_neighbors=min(20, len(x)//2), contamination=0.1)
+                    outlier_labels = detector.fit_predict(x.values.reshape(-1, 1))
+                    outlier_scores = detector.negative_outlier_factor_
+                    
+                elif method == 'zscore':
+                    z_scores = np.abs(stats.zscore(x))
+                    outlier_labels = (z_scores > 3).astype(int)
+                    outlier_scores = z_scores
+                    outlier_labels[outlier_labels == 1] = -1  # Convert to -1, 1 format
+                    
+                else:
+                    raise ValueError(f"Unknown method: {method}")
+                
+                # Calculate outlier statistics
+                n_outliers = (outlier_labels == -1).sum()
+                outlier_rate = n_outliers / len(x)
+                
+                outlier_data.append({
+                    'group': group_key,
+                    'feature': feature,
+                    'method': method,
+                    'n_outliers': n_outliers,
+                    'outlier_rate': outlier_rate,
+                    'avg_outlier_score': outlier_scores[outlier_labels == -1].mean() if n_outliers > 0 else 0,
+                    'max_outlier_score': outlier_scores.max(),
+                    'min_outlier_score': outlier_scores.min()
+                })
+                
+            except Exception as e:
+                print(f"Warning: Could not detect outliers for {group_key}: {e}")
+                continue
+        
+        outlier_df = pd.DataFrame(outlier_data)
+        
+        # Save tables
+        if table:
+            outlier_df.to_csv(f'{results_dir}/outlier_detection_{method}.csv', index=False)
+        
+        # Generate plots
+        if publish_plot and not outlier_df.empty:
+            self._plot_outlier_analysis(outlier_df, feature, method, results_dir)
+        
+        return {
+            'outlier_stats': outlier_df,
+            'summary': {
+                'avg_outlier_rate': outlier_df['outlier_rate'].mean(),
+                'groups_with_outliers': (outlier_df['n_outliers'] > 0).sum(),
+                'total_outliers': outlier_df['n_outliers'].sum()
+            }
+        }
+
+    def _plot_regime_analysis(self, regime_df: pd.DataFrame, feature: str, results_dir: str):
+        """Plot regime detection results."""
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle(f'Regime Detection Analysis: {feature}', fontsize=16, fontweight='bold')
+        
+        palette = self._palette()
+        
+        # Regime probabilities scatter
+        axes[0, 0].scatter(regime_df['regime_1_prob'], regime_df['regime_2_prob'], 
+                          c=palette[0], s=60, alpha=0.7)
+        axes[0, 0].set_xlabel('Regime 1 Probability')
+        axes[0, 0].set_ylabel('Regime 2 Probability')
+        axes[0, 0].set_title('Regime Probability Distribution')
+        
+        # Number of switches
+        axes[0, 1].hist(regime_df['regime_switches'], bins=10, color=palette[1], alpha=0.7)
+        axes[0, 1].set_xlabel('Number of Regime Switches')
+        axes[0, 1].set_ylabel('Frequency')
+        axes[0, 1].set_title('Regime Switch Distribution')
+        
+        # Model fit comparison
+        axes[1, 0].scatter(regime_df['aic'], regime_df['bic'], c=palette[2], s=60, alpha=0.7)
+        axes[1, 0].set_xlabel('AIC')
+        axes[1, 0].set_ylabel('BIC')
+        axes[1, 0].set_title('Model Fit Comparison')
+        
+        # Log likelihood
+        axes[1, 1].hist(regime_df['log_likelihood'], bins=10, color=palette[3], alpha=0.7)
+        axes[1, 1].set_xlabel('Log Likelihood')
+        axes[1, 1].set_ylabel('Frequency')
+        axes[1, 1].set_title('Log Likelihood Distribution')
+        
+        for ax in axes.flat:
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.grid(False)
+        
+        plt.tight_layout()
+        plt.savefig(f'{results_dir}/regime_detection_{feature}.png', dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def _plot_volatility_analysis(self, vol_df: pd.DataFrame, feature: str, model_type: str, results_dir: str):
+        """Plot volatility analysis results."""
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle(f'Volatility Analysis ({model_type}): {feature}', fontsize=16, fontweight='bold')
+        
+        palette = self._palette()
+        
+        # Persistence vs Average Volatility
+        axes[0, 0].scatter(vol_df['persistence'], vol_df['avg_volatility'], 
+                          c=palette[0], s=60, alpha=0.7)
+        axes[0, 0].set_xlabel('Persistence')
+        axes[0, 0].set_ylabel('Average Volatility')
+        axes[0, 0].set_title('Persistence vs Volatility')
+        
+        # Volatility distribution
+        axes[0, 1].hist(vol_df['avg_volatility'], bins=10, color=palette[1], alpha=0.7)
+        axes[0, 1].set_xlabel('Average Volatility')
+        axes[0, 1].set_ylabel('Frequency')
+        axes[0, 1].set_title('Volatility Distribution')
+        
+        # Model fit
+        axes[1, 0].scatter(vol_df['aic'], vol_df['bic'], c=palette[2], s=60, alpha=0.7)
+        axes[1, 0].set_xlabel('AIC')
+        axes[1, 0].set_ylabel('BIC')
+        axes[1, 0].set_title('Model Fit Comparison')
+        
+        # Volatility skewness
+        axes[1, 1].hist(vol_df['vol_skew'], bins=10, color=palette[3], alpha=0.7)
+        axes[1, 1].set_xlabel('Volatility Skewness')
+        axes[1, 1].set_ylabel('Frequency')
+        axes[1, 1].set_title('Volatility Skewness Distribution')
+        
+        for ax in axes.flat:
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.grid(False)
+        
+        plt.tight_layout()
+        plt.savefig(f'{results_dir}/volatility_analysis_{model_type.lower()}_{feature}.png', 
+                   dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def _plot_outlier_analysis(self, outlier_df: pd.DataFrame, feature: str, method: str, results_dir: str):
+        """Plot outlier detection results."""
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle(f'Outlier Detection ({method}): {feature}', fontsize=16, fontweight='bold')
+        
+        palette = self._palette()
+        
+        # Outlier rate distribution
+        axes[0, 0].hist(outlier_df['outlier_rate'], bins=10, color=palette[0], alpha=0.7)
+        axes[0, 0].set_xlabel('Outlier Rate')
+        axes[0, 0].set_ylabel('Frequency')
+        axes[0, 0].set_title('Outlier Rate Distribution')
+        
+        # Number of outliers
+        axes[0, 1].hist(outlier_df['n_outliers'], bins=10, color=palette[1], alpha=0.7)
+        axes[0, 1].set_xlabel('Number of Outliers')
+        axes[0, 1].set_ylabel('Frequency')
+        axes[0, 1].set_title('Outlier Count Distribution')
+        
+        # Outlier scores
+        axes[1, 0].scatter(outlier_df['avg_outlier_score'], outlier_df['max_outlier_score'], 
+                          c=palette[2], s=60, alpha=0.7)
+        axes[1, 0].set_xlabel('Average Outlier Score')
+        axes[1, 0].set_ylabel('Max Outlier Score')
+        axes[1, 0].set_title('Outlier Score Comparison')
+        
+        # Groups with outliers
+        outlier_groups = (outlier_df['n_outliers'] > 0).sum()
+        total_groups = len(outlier_df)
+        axes[1, 1].pie([outlier_groups, total_groups - outlier_groups], 
+                      labels=['With Outliers', 'No Outliers'], 
+                      colors=[palette[3], palette[4]], autopct='%1.1f%%')
+        axes[1, 1].set_title('Groups with Outliers')
+        
+        for ax in axes.flat:
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.grid(False)
+        
+        plt.tight_layout()
+        plt.savefig(f'{results_dir}/outlier_detection_{method}_{feature}.png', 
+                   dpi=300, bbox_inches='tight')
+        plt.close()

@@ -133,6 +133,43 @@ def main():
         print("[skip] statsmodels not installed: cross-feature comparisons")
 
     print("\nAll outputs saved to CSV files with prefix 'out_'.")
+    print()
+
+    # 8) Advanced Analysis Methods
+    print("=" * 60)
+    print("ADVANCED ANALYSIS METHODS")
+    print("=" * 60)
+
+    # Regime Detection
+    if HAS_STATSMODELS:
+        print("8) Regime Detection (Markov Switching)")
+        regime_results = study.regime_detection('feature_1', n_regimes=2, publish_plot=True, table=True)
+        print("Regime Detection Summary:")
+        print(f"  Average switches: {regime_results['summary']['avg_switches']:.2f}")
+        print(f"  Average regime 1 prob: {regime_results['summary']['avg_regime_1_prob']:.3f}")
+        print(f"  Average regime 2 prob: {regime_results['summary']['avg_regime_2_prob']:.3f}")
+        print()
+
+    # Volatility Analysis
+    if HAS_STATSMODELS:
+        print("9) Volatility Analysis (GARCH)")
+        vol_results = study.volatility_analysis('feature_1', model_type='GARCH', publish_plot=True, table=True)
+        print("Volatility Analysis Summary:")
+        print(f"  Average persistence: {vol_results['summary']['avg_persistence']:.3f}")
+        print(f"  Average volatility: {vol_results['summary']['avg_volatility']:.3f}")
+        print(f"  Volatility clustering: {vol_results['summary']['vol_clustering']}")
+        print()
+
+    # Outlier Detection
+    print("10) Outlier Detection")
+    outlier_results = study.outlier_detection('feature_1', method='isolation_forest', publish_plot=True, table=True)
+    print("Outlier Detection Summary:")
+    print(f"  Average outlier rate: {outlier_results['summary']['avg_outlier_rate']:.3f}")
+    print(f"  Groups with outliers: {outlier_results['summary']['groups_with_outliers']}")
+    print(f"  Total outliers: {outlier_results['summary']['total_outliers']}")
+    print()
+
+    print("Advanced analysis complete! Check time_series_study/results/ for all outputs.")
 
 
 if __name__ == '__main__':
