@@ -4,6 +4,7 @@ from typing import Iterable, List, Optional, Tuple, Dict, Any
 
 import numpy as np
 import pandas as pd
+import os
 
 
 @dataclass
@@ -41,6 +42,8 @@ class TimeSeriesStudy:
         self.date_level: str = 'date'
         self.group_levels: List[str] = [n for n in self.index_names if n != self.date_level]
         self.features: List[str] = [c for c in self.df.columns]
+        # default results directory
+        self.default_results_dir = os.path.join('time_series_study', 'results')
 
     @staticmethod
     def _validate_and_prepare(df: pd.DataFrame) -> pd.DataFrame:
@@ -85,8 +88,44 @@ class TimeSeriesStudy:
                 key_vals = (key_vals,)
             yield GroupKey(tuple(key_vals)), subdf
 
+    # ---------- Presentation helpers ----------
+    @staticmethod
+    def _ensure_dir(path: str) -> None:
+        os.makedirs(path, exist_ok=True)
+
+    @staticmethod
+    def _minimalist_axes(ax, title: Optional[str] = None) -> None:
+        # Ultra-minimalist aesthetic: no spines, no grid, sparse ticks
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.grid(False)
+        ax.set_facecolor('white')
+        if title:
+            ax.set_title(title, fontsize=12, pad=8)
+        ax.tick_params(axis='both', which='both', length=0, labelsize=9)
+
+    @staticmethod
+    def _palette() -> List[str]:
+        # Consistent color order: black, red, then complementary set
+        return ['#000000', '#D62728', '#1F77B4', '#2CA02C', '#FF7F0E', '#9467BD', '#8C564B']
+
+    @staticmethod
+    def _save_df_table(df: pd.DataFrame, out_path_no_ext: str) -> None:
+        # Save both CSV and simple styled HTML
+        csv_path = out_path_no_ext + '.csv'
+        html_path = out_path_no_ext + '.html'
+        df.to_csv(csv_path, index=False)
+        try:
+            styled = df.head(1000).style.set_table_styles([
+                {'selector': 'th', 'props': [('font-weight', '600'), ('text-align', 'center')]},
+                {'selector': 'td', 'props': [('padding', '4px 8px')]},
+            ]).hide_index()
+            styled.to_html(html_path)
+        except Exception:
+            pass
+
     # 1) Distribution & Volatility Diagnostics
-    def distribution_diagnostics(self, plot: bool = False) -> pd.DataFrame:
+    def distribution_diagnostics(self, publish_plot: bool = False, table: bool = False, results_dir: Optional[str] = None) -> pd.DataFrame:
         """
         Summarize the distributional shape of each feature within each group.
 
@@ -117,21 +156,31 @@ class TimeSeriesStudy:
 
         result = pd.DataFrame.from_records(records)
 
-        if plot and not result.empty:
+        if table and not result.empty:
+            out_dir = results_dir or self.default_results_dir
+            self._ensure_dir(out_dir)
+            self._save_df_table(result, os.path.join(out_dir, 'distribution_diagnostics'))
+
+        if publish_plot and not result.empty:
             import matplotlib.pyplot as plt
+            plt.ioff()
+            palette = self._palette()
+            out_dir = results_dir or self.default_results_dir
+            self._ensure_dir(out_dir)
             for feature, fdf in result.groupby('feature'):
-                fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-                axes[0].hist(fdf['skew'].dropna(), bins=20, color='steelblue', edgecolor='white')
-                axes[0].set_title(f"Skewness distribution: {feature}")
-                axes[1].hist(fdf['kurtosis'].dropna(), bins=20, color='darkorange', edgecolor='white')
-                axes[1].set_title(f"Kurtosis distribution: {feature}")
+                fig, axes = plt.subplots(1, 2, figsize=(9, 3))
+                axes[0].hist(fdf['skew'].dropna(), bins=16, color=palette[1])
+                self._minimalist_axes(axes[0], title=f"Skew: {feature}")
+                axes[1].hist(fdf['kurtosis'].dropna(), bins=16, color=palette[2])
+                self._minimalist_axes(axes[1], title=f"Kurtosis: {feature}")
                 fig.tight_layout()
-                plt.show()
+                fig.savefig(os.path.join(out_dir, f"distribution_{feature}.png"), dpi=150, bbox_inches='tight')
+                plt.close(fig)
 
         return result.sort_values(['feature', 'group']).reset_index(drop=True)
 
     # 2) Stationarity Tests (ADF, KPSS)
-    def stationarity_tests(self, regression: str = 'c') -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def stationarity_tests(self, regression: str = 'c', publish_plot: bool = False, table: bool = False, results_dir: Optional[str] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Assess stationarity for each (group × feature) via ADF and KPSS tests.
 
@@ -186,10 +235,58 @@ class TimeSeriesStudy:
                 'prop_reject_stationarity': prop_reject_stationarity,
             })
         summary_df = pd.DataFrame.from_records(summaries)
-        return results_df.sort_values(['feature','group']).reset_index(drop=True), summary_df.sort_values('feature').reset_index(drop=True)
+        results_df = results_df.sort_values(['feature','group']).reset_index(drop=True)
+        summary_df = summary_df.sort_values('feature').reset_index(drop=True)
+
+        out_dir = results_dir or self.default_results_dir
+        if table and not results_df.empty:
+            self._ensure_dir(out_dir)
+            self._save_df_table(results_df, os.path.join(out_dir, 'stationarity_results'))
+            self._save_df_table(summary_df, os.path.join(out_dir, 'stationarity_summary'))
+
+        if publish_plot and not results_df.empty:
+            import matplotlib.pyplot as plt
+            plt.ioff()
+            palette = self._palette()
+            self._ensure_dir(out_dir)
+            # Proportion bars per feature
+            fig, ax = plt.subplots(figsize=(6, 3))
+            x = np.arange(len(summary_df))
+            w = 0.35
+            ax.bar(x - w/2, summary_df['prop_reject_unit_root'].values, width=w, color=palette[1], label='ADF rejects')
+            ax.bar(x + w/2, summary_df['prop_reject_stationarity'].values, width=w, color=palette[2], label='KPSS rejects')
+            ax.set_xticks(x)
+            ax.set_xticklabels(summary_df['feature'].values, rotation=0, fontsize=9)
+            self._minimalist_axes(ax, title='Stationarity rejections')
+            ax.legend(frameon=False, fontsize=8, loc='upper right')
+            fig.tight_layout()
+            fig.savefig(os.path.join(out_dir, 'stationarity_summary.png'), dpi=150, bbox_inches='tight')
+            plt.close(fig)
+
+            # Dumbbell-like: per feature, sorted by group index; plot lines ADF vs KPSS p
+            for feature, fdf in results_df.groupby('feature'):
+                if fdf.empty:
+                    continue
+                fig, ax = plt.subplots(figsize=(7, 4))
+                y = np.arange(len(fdf))
+                a = fdf['adf_p'].values
+                k = fdf['kpss_p'].values
+                for i in range(len(y)):
+                    ax.plot([a[i], k[i]], [y[i], y[i]], color=palette[0], linewidth=2)
+                ax.scatter(a, y, color=palette[1], s=16, label='ADF p')
+                ax.scatter(k, y, color=palette[2], s=16, label='KPSS p')
+                ax.set_xlabel('p-value')
+                ax.set_yticks([])
+                self._minimalist_axes(ax, title=f'Stationarity p-values: {feature}')
+                ax.legend(frameon=False, fontsize=8, loc='lower right')
+                fig.tight_layout()
+                fig.savefig(os.path.join(out_dir, f'stationarity_dumbbell_{feature}.png'), dpi=150, bbox_inches='tight')
+                plt.close(fig)
+
+        return results_df, summary_df
 
     # 3) Memory & Dependence Structure
-    def memory_dependence(self) -> pd.DataFrame:
+    def memory_dependence(self, publish_plot: bool = False, table: bool = False, results_dir: Optional[str] = None) -> pd.DataFrame:
         """
         Quantify dependence on the past per (group × feature).
 
@@ -243,10 +340,31 @@ class TimeSeriesStudy:
                     'hurst_exp': h,
                 })
 
-        return pd.DataFrame.from_records(records).sort_values(['feature','group']).reset_index(drop=True)
+        df_out = pd.DataFrame.from_records(records).sort_values(['feature','group']).reset_index(drop=True)
+
+        out_dir = results_dir or self.default_results_dir
+        if table and not df_out.empty:
+            self._ensure_dir(out_dir)
+            self._save_df_table(df_out, os.path.join(out_dir, 'memory_dependence'))
+
+        if publish_plot and not df_out.empty:
+            import matplotlib.pyplot as plt
+            plt.ioff()
+            palette = self._palette()
+            self._ensure_dir(out_dir)
+            # Hurst histogram per feature
+            for feature, fdf in df_out.groupby('feature'):
+                fig, ax = plt.subplots(figsize=(6, 3))
+                ax.hist(fdf['hurst_exp'].dropna(), bins=16, color=palette[2])
+                self._minimalist_axes(ax, title=f'Hurst exponent: {feature}')
+                fig.tight_layout()
+                fig.savefig(os.path.join(out_dir, f'hurst_{feature}.png'), dpi=150, bbox_inches='tight')
+                plt.close(fig)
+
+        return df_out
 
     # 4) Frequency-Domain Analysis
-    def frequency_domain(self, detrend: bool = True) -> Tuple[pd.DataFrame, Optional[Dict[str, Any]]]:
+    def frequency_domain(self, detrend: bool = True, publish_plot: bool = False, table: bool = False, results_dir: Optional[str] = None) -> Tuple[pd.DataFrame, Optional[Dict[str, Any]]]:
         """
         Detect cyclic structure using the (discrete) periodogram per (group × feature).
 
@@ -290,11 +408,33 @@ class TimeSeriesStudy:
                     'dom_power': float(power[idx]),
                 })
 
-        return pd.DataFrame.from_records(results).sort_values(['feature','group']).reset_index(drop=True), None
+        df_out = pd.DataFrame.from_records(results).sort_values(['feature','group']).reset_index(drop=True)
+
+        out_dir = results_dir or self.default_results_dir
+        if table and not df_out.empty:
+            self._ensure_dir(out_dir)
+            self._save_df_table(df_out, os.path.join(out_dir, 'frequency_domain'))
+
+        if publish_plot and not df_out.empty:
+            import matplotlib.pyplot as plt
+            plt.ioff()
+            palette = self._palette()
+            self._ensure_dir(out_dir)
+            for feature, fdf in df_out.groupby('feature'):
+                fig, ax = plt.subplots(figsize=(6, 3))
+                ax.scatter(fdf['dom_freq'], fdf['dom_power'], color=palette[1], s=14)
+                ax.set_xlabel('dom freq')
+                ax.set_ylabel('power')
+                self._minimalist_axes(ax, title=f'Dominant frequency: {feature}')
+                fig.tight_layout()
+                fig.savefig(os.path.join(out_dir, f'dom_freq_{feature}.png'), dpi=150, bbox_inches='tight')
+                plt.close(fig)
+
+        return df_out, None
 
 
     # 5) Cross-Sectional Dispersion
-    def cross_sectional_dispersion(self, feature: str, plot: bool = False) -> pd.Series:
+    def cross_sectional_dispersion(self, feature: str, publish_plot: bool = False, table: bool = False, results_dir: Optional[str] = None) -> pd.Series:
         """
         Show how much groups diverge from each other at each date for a given feature.
 
@@ -313,16 +453,26 @@ class TimeSeriesStudy:
             cs = wide.std(axis=1)
             cs.name = f"dispersion_{feature}"
 
-        if plot:
+        out_dir = results_dir or self.default_results_dir
+        if table:
+            self._ensure_dir(out_dir)
+            self._save_df_table(cs.reset_index().rename(columns={0: cs.name, cs.name: 'dispersion'}), os.path.join(out_dir, f'dispersion_{feature}'))
+
+        if publish_plot:
             import matplotlib.pyplot as plt
-            cs.plot(title=f"Cross-sectional dispersion: {feature}", figsize=(8, 3))
-            plt.tight_layout()
-            plt.show()
+            plt.ioff()
+            self._ensure_dir(out_dir)
+            fig, ax = plt.subplots(figsize=(8, 3))
+            ax.plot(cs.index, cs.values, color=self._palette()[0], linewidth=2)
+            self._minimalist_axes(ax, title=f'Dispersion: {feature}')
+            fig.tight_layout()
+            fig.savefig(os.path.join(out_dir, f'dispersion_{feature}.png'), dpi=150, bbox_inches='tight')
+            plt.close(fig)
 
         return cs
 
     # 6) Predictability (AR(1) Fit)
-    def predictability_ar1(self) -> pd.DataFrame:
+    def predictability_ar1(self, publish_plot: bool = False, table: bool = False, results_dir: Optional[str] = None) -> pd.DataFrame:
         """
         Quick test of linear predictability: fit x[t] on x[t-1] per (group × feature).
 
@@ -350,7 +500,27 @@ class TimeSeriesStudy:
                 except Exception:
                     r2 = np.nan
                 records.append({'group': str(gkey), 'feature': feature, 'ar1_r2': r2})
-        return pd.DataFrame.from_records(records).sort_values(['feature','group']).reset_index(drop=True)
+        df_out = pd.DataFrame.from_records(records).sort_values(['feature','group']).reset_index(drop=True)
+
+        out_dir = results_dir or self.default_results_dir
+        if table and not df_out.empty:
+            self._ensure_dir(out_dir)
+            self._save_df_table(df_out, os.path.join(out_dir, 'predictability_ar1'))
+
+        if publish_plot and not df_out.empty:
+            import matplotlib.pyplot as plt
+            plt.ioff()
+            palette = self._palette()
+            self._ensure_dir(out_dir)
+            for feature, fdf in df_out.groupby('feature'):
+                fig, ax = plt.subplots(figsize=(6, 3))
+                ax.hist(fdf['ar1_r2'].dropna(), bins=16, color=palette[1])
+                self._minimalist_axes(ax, title=f'AR(1) R²: {feature}')
+                fig.tight_layout()
+                fig.savefig(os.path.join(out_dir, f'ar1_r2_{feature}.png'), dpi=150, bbox_inches='tight')
+                plt.close(fig)
+
+        return df_out
 
     # 7) Cross-Feature Comparisons (within same groups)
     def cross_feature_comparisons(
@@ -360,6 +530,9 @@ class TimeSeriesStudy:
         rolling_window: int = 10,
         example_group: Optional[Tuple[Any, ...]] = None,
         plot: bool = False,
+        publish_plot: bool = False,
+        table: bool = False,
+        results_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Study relationships between pairs of features within the same groups.
@@ -455,24 +628,52 @@ class TimeSeriesStudy:
                 granger_rows.append({'group': str(gkey), 'pair': f'{fa}|{fb}', 'pvalue': g_p})
                 mi_rows.append({'group': str(gkey), 'pair': f'{fa}|{fb}', 'mi': mi_val})
 
+        # Optional tables
+        out_dir = results_dir or self.default_results_dir
+        if table:
+            self._ensure_dir(out_dir)
+            if not lagged_corr_df.empty:
+                lagged_corr_df.to_csv(os.path.join(out_dir, 'lagged_corr.csv'))
+            if coint_rows:
+                pd.DataFrame.from_records(coint_rows).to_csv(os.path.join(out_dir, 'cointegration.csv'), index=False)
+            if granger_rows:
+                pd.DataFrame.from_records(granger_rows).to_csv(os.path.join(out_dir, 'granger.csv'), index=False)
+            if mi_rows:
+                pd.DataFrame.from_records(mi_rows).to_csv(os.path.join(out_dir, 'mutual_info.csv'), index=False)
+
         # Optional plots
-        if plot and not lagged_corr_df.empty and example_key is not None:
+        if (plot or publish_plot) and not lagged_corr_df.empty and example_key is not None:
             import matplotlib.pyplot as plt
-            ax = lagged_corr_df.plot(title='Average lagged correlations', figsize=(8, 4))
-            ax.set_xlabel('lag')
-            ax.set_ylabel('correlation')
-            plt.tight_layout()
-            for (fa, fb) in feature_pairs[:1]:
+            plt.ioff()
+            palette = self._palette()
+            self._ensure_dir(out_dir)
+            # Lagged correlation heatmap-like line plot
+            fig, ax = plt.subplots(figsize=(8, 3))
+            for i, col in enumerate(lagged_corr_df.columns[:5]):
+                ax.plot(lagged_corr_df.index, lagged_corr_df[col].values, linewidth=2, color=palette[i % len(palette)], label=col)
+            self._minimalist_axes(ax, title='Avg lagged correlations (top 5 pairs)')
+            ax.legend(frameon=False, fontsize=7, loc='upper right', ncol=1)
+            fig.tight_layout()
+            fig.savefig(os.path.join(out_dir, 'lagged_corr.png'), dpi=150, bbox_inches='tight')
+            plt.close(fig)
+
+            # Rolling correlation example for first pair and example group
+            (fa, fb) = feature_pairs[0] if feature_pairs else (None, None)
+            if fa and fb:
                 for gkey, subdf in self._iter_groups():
                     if str(gkey) == str(example_key):
                         ts_df = subdf.droplevel(self.group_levels) if len(self.group_levels) else subdf
                         a = ts_df[fa].astype(float)
                         b = ts_df[fb].astype(float)
                         roll = pd.concat([a, b], axis=1).rolling(rolling_window).corr().unstack().iloc[:, 1]
-                        roll.plot(title=f"Rolling corr ({fa} vs {fb}) - group {gkey}")
-                        plt.tight_layout()
+                        fig, ax = plt.subplots(figsize=(8, 3))
+                        ax.plot(roll.index, roll.values, color=palette[1], linewidth=2, label=f'{fa}|{fb}')
+                        self._minimalist_axes(ax, title=f'Rolling corr ({fa} vs {fb}) - {gkey}')
+                        ax.legend(frameon=False, fontsize=7, loc='upper right')
+                        fig.tight_layout()
+                        fig.savefig(os.path.join(out_dir, 'rolling_corr_example.png'), dpi=150, bbox_inches='tight')
+                        plt.close(fig)
                         break
-            plt.show()
 
         out = {
             'lagged_corr': lagged_corr_df,
