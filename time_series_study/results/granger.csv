@@ -1,0 +1,11 @@
+group,pair,pvalue
+G1,feature_1|feature_2,0.1705895046128496
+G2,feature_1|feature_2,0.4420440389877769
+G3,feature_1|feature_2,0.3440868112293599
+G4,feature_1|feature_2,0.543454144996057
+G5,feature_1|feature_2,0.021982071500715624
+G1,feature_1|feature_3,0.43874971066775625
+G2,feature_1|feature_3,0.014158685502864381
+G3,feature_1|feature_3,0.5794991272107008
+G4,feature_1|feature_3,0.11440545328124672
+G5,feature_1|feature_3,0.3732582391917334

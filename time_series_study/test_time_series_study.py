@@ -58,7 +58,7 @@ def main():
     study = TimeSeriesStudy(df)
 
     # 1) Distribution & Volatility Diagnostics
-    dist_df = study.distribution_diagnostics(publish_plot=False, table=True)
+    dist_df = study.distribution_diagnostics(publish_plot=True, table=True)
     print("Distribution & Volatility Diagnostics (head):")
     print(dist_df.head())
     dist_df.to_csv('out_distribution.csv', index=False)
@@ -66,7 +66,7 @@ def main():
 
     # 2) Stationarity Tests (ADF, KPSS)
     if HAS_STATSMODELS:
-        stat_df, stat_summary = study.stationarity_tests(regression='c', publish_plot=False, table=True)
+        stat_df, stat_summary = study.stationarity_tests(regression='c', publish_plot=True, table=True)
         print("Stationarity Tests (head):")
         print(stat_df.head())
         print("Stationarity Summary:")
@@ -80,7 +80,7 @@ def main():
 
     # 3) Memory & Dependence Structure
     if HAS_STATSMODELS:
-        mem_df = study.memory_dependence(publish_plot=False, table=True)
+        mem_df = study.memory_dependence(publish_plot=True, table=True)
         print("Memory & Dependence (head):")
         print(mem_df.head())
         mem_df.to_csv('out_memory.csv', index=False)
@@ -90,21 +90,21 @@ def main():
         print()
 
     # 4) Frequency-Domain Analysis
-    freq_df, _ = study.frequency_domain(detrend=True, publish_plot=False, table=True)
+    freq_df, _ = study.frequency_domain(detrend=True, publish_plot=True, table=True)
     print("Frequency-Domain (head):")
     print(freq_df.head())
     freq_df.to_csv('out_frequency.csv', index=False)
     print()
 
     # 5) Cross-Sectional Dispersion (one feature)
-    cs_disp = study.cross_sectional_dispersion('feature_1', publish_plot=False, table=True)
+    cs_disp = study.cross_sectional_dispersion('feature_1', publish_plot=True, table=True)
     print("Cross-Sectional Dispersion (feature_1) (head):")
     print(cs_disp.head())
     cs_disp.to_frame().to_csv('out_cross_section_dispersion_feature1.csv')
     print()
 
     # 6) Predictability (AR(1) Fit)
-    ar1_df = study.predictability_ar1(publish_plot=False, table=True)
+    ar1_df = study.predictability_ar1(publish_plot=True, table=True)
     print("Predictability AR(1) (head):")
     print(ar1_df.head())
     ar1_df.to_csv('out_ar1.csv', index=False)
@@ -113,7 +113,7 @@ def main():
     # 7) Cross-Feature Comparisons
     if HAS_STATSMODELS:
         pairs = [('feature_1', 'feature_2'), ('feature_1', 'feature_3')]
-        xfeat = study.cross_feature_comparisons(feature_pairs=pairs, max_lag=6, rolling_window=10, plot=False, publish_plot=False, table=True)
+        xfeat = study.cross_feature_comparisons(feature_pairs=pairs, max_lag=6, rolling_window=10, plot=False, publish_plot=True, table=True)
         print("Lagged Correlations (head):")
         print(xfeat['lagged_corr'].head())
         xfeat['lagged_corr'].to_csv('out_lagged_corr.csv')

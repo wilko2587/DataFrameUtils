@@ -1,0 +1,4 @@
+feature,prop_reject_unit_root,prop_reject_stationarity
+feature_1,1.0,0.8
+feature_2,0.6,0.0
+feature_3,0.4,0.2
